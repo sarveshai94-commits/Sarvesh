@@ -1,0 +1,7 @@
+{
+  "name": "Academy Quest: School RPG",
+  "description": "A high-end gamified school management system featuring automated timetables, class timers with 'bells', assignment tracking, and an immersive XP/Leveling system.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
