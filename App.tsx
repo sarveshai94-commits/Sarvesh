@@ -19,6 +19,13 @@ const App: React.FC = () => {
   const [state, setState] = useState<AppState>(() => {
     const saved = localStorage.getItem('academyQuestState');
     if (saved) return JSON.parse(saved);
+    // Dynamic dates for initial state to ensure some look "upcoming"
+    const today = new Date();
+    const inTwoDays = new Date(today);
+    inTwoDays.setDate(today.getDate() + 2);
+    const inFiveDays = new Date(today);
+    inFiveDays.setDate(today.getDate() + 5);
+
     return {
       stats: {
         xp: 450,
@@ -31,8 +38,8 @@ const App: React.FC = () => {
       },
       timetable: INITIAL_TIMETABLE,
       assignments: [
-        { id: 'a1', title: 'Calculus Quiz Prep', subject: 'Math', dueDate: '2023-12-01', xpReward: 500, completed: false, priority: 'High' },
-        { id: 'a2', title: 'Code a React App', subject: 'CS', dueDate: '2023-12-05', xpReward: 800, completed: false, priority: 'Medium' }
+        { id: 'a1', title: 'Calculus Quiz Prep', subject: 'Math', dueDate: inTwoDays.toISOString().split('T')[0], xpReward: 500, completed: false, priority: 'High' },
+        { id: 'a2', title: 'Code a React App', subject: 'CS', dueDate: inFiveDays.toISOString().split('T')[0], xpReward: 800, completed: false, priority: 'Medium' }
       ],
       isSchoolModeActive: false
     };
@@ -94,11 +101,37 @@ const App: React.FC = () => {
       })[0] || null;
   }, [currentSessions]);
 
+  // Assignment Deadline Logic
+  const assignmentStatus = useMemo(() => {
+    const now = new Date();
+    const urgent = state.assignments.filter(a => {
+      if (a.completed) return false;
+      const dueDate = new Date(a.dueDate);
+      const diffTime = dueDate.getTime() - now.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      return diffDays <= 2;
+    });
+
+    return {
+      urgentCount: urgent.length,
+      urgentList: urgent
+    };
+  }, [state.assignments]);
+
+  const getDaysRemaining = (dateStr: string) => {
+    const now = new Date();
+    const dueDate = new Date(dateStr);
+    const diffTime = dueDate.getTime() - now.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    if (diffDays < 0) return 'OVERDUE';
+    if (diffDays === 0) return 'DUE TODAY';
+    return `${diffDays}d left`;
+  };
+
   const handleBell = useCallback((endedSession: ClassSession) => {
     const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3');
     audio.play().catch(() => {});
     
-    // Auto-log the topics for the ended session
     if (!endedSession.isBreak && currentTopics > 0) {
       const [sh, sm] = endedSession.startTime.split(':').map(Number);
       const [eh, em] = endedSession.endTime.split(':').map(Number);
@@ -117,22 +150,17 @@ const App: React.FC = () => {
         stats: {
           ...prev.stats,
           topicHistory: [...prev.stats.topicHistory, record],
-          xp: prev.stats.xp + (currentTopics * 20) + 100, // XP for finishing session + topics
+          xp: prev.stats.xp + (currentTopics * 20) + 100,
         }
       }));
       setCurrentTopics(0);
     } else {
-      // Basic XP for just attending
       setState(prev => ({
         ...prev,
-        stats: {
-          ...prev.stats,
-          xp: prev.stats.xp + 50
-        }
+        stats: { ...prev.stats, xp: prev.stats.xp + 50 }
       }));
     }
 
-    // Level calculation is automated in XPBar, but we keep it in state for AI
     setState(prev => ({
       ...prev,
       stats: {
@@ -144,7 +172,6 @@ const App: React.FC = () => {
 
   const toggleSchoolMode = () => {
     if (!state.isSchoolModeActive) {
-      // Start of day: Log attendance
       const today = new Date().toISOString().split('T')[0];
       const attendedToday = state.stats.attendance.includes(today);
       
@@ -154,7 +181,7 @@ const App: React.FC = () => {
         stats: {
           ...prev.stats,
           attendance: attendedToday ? prev.stats.attendance : [...prev.stats.attendance, today],
-          xp: attendedToday ? prev.stats.xp : prev.stats.xp + 200 // First log reward
+          xp: attendedToday ? prev.stats.xp : prev.stats.xp + 200
         }
       }));
     } else {
@@ -185,7 +212,10 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen p-4 md:p-8 flex flex-col gap-6 max-w-7xl mx-auto pb-24 lg:pb-8">
       {/* Top HUD */}
-      <header className="flex flex-col md:flex-row justify-between items-center gap-6 glass rounded-2xl p-6 neon-border">
+      <header className="flex flex-col md:flex-row justify-between items-center gap-6 glass rounded-2xl p-6 neon-border relative overflow-hidden">
+        {assignmentStatus.urgentCount > 0 && (
+          <div className="absolute top-0 left-0 w-full h-1 bg-red-600 animate-pulse"></div>
+        )}
         <div className="flex items-center gap-4">
           <div className="relative">
             <div className="w-16 h-16 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 border-2 border-white/20 flex items-center justify-center text-3xl shadow-lg shadow-cyan-500/20">
@@ -193,6 +223,11 @@ const App: React.FC = () => {
             </div>
             {state.isSchoolModeActive && (
                <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-green-500 rounded-full border-4 border-[#050505] animate-pulse"></div>
+            )}
+            {assignmentStatus.urgentCount > 0 && (
+               <div className="absolute -top-1 -left-1 w-6 h-6 bg-red-600 rounded-full border-4 border-[#050505] flex items-center justify-center text-[10px] font-bold text-white shadow-lg animate-bounce">
+                !
+               </div>
             )}
           </div>
           <div>
@@ -219,6 +254,24 @@ const App: React.FC = () => {
         </div>
       </header>
 
+      {/* Persistent Warning Bar for Deadlines */}
+      {assignmentStatus.urgentCount > 0 && (
+        <div className="bg-red-600/20 border border-red-500 rounded-xl px-6 py-3 flex items-center justify-between animate-pulse">
+          <div className="flex items-center gap-3">
+            <span className="text-xl">⚠️</span>
+            <div className="font-gaming text-[10px] text-red-400 uppercase tracking-widest">
+              SYSTEM ALERT: {assignmentStatus.urgentCount} CRITICAL DEADLINES APPROACHING
+            </div>
+          </div>
+          <button 
+            onClick={() => setActiveTab('tasks')}
+            className="text-[10px] font-gaming text-white underline underline-offset-4 hover:text-red-300 transition-colors uppercase"
+          >
+            Review Quests
+          </button>
+        </div>
+      )}
+
       <main className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
         {/* Left Column: Navigation & Stats */}
         <aside className="lg:col-span-3 flex flex-col gap-6">
@@ -229,8 +282,11 @@ const App: React.FC = () => {
             <button onClick={() => setActiveTab('schedule')} className={`flex-1 p-3 rounded-xl font-gaming text-xs uppercase transition-all flex items-center gap-3 ${activeTab === 'schedule' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/50' : 'text-gray-500 hover:text-white'}`}>
               <span className="text-lg">📅</span> Maps
             </button>
-            <button onClick={() => setActiveTab('tasks')} className={`flex-1 p-3 rounded-xl font-gaming text-xs uppercase transition-all flex items-center gap-3 ${activeTab === 'tasks' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/50' : 'text-gray-500 hover:text-white'}`}>
+            <button onClick={() => setActiveTab('tasks')} className={`relative flex-1 p-3 rounded-xl font-gaming text-xs uppercase transition-all flex items-center gap-3 ${activeTab === 'tasks' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/50' : 'text-gray-500 hover:text-white'}`}>
               <span className="text-lg">⚔️</span> Quests
+              {assignmentStatus.urgentCount > 0 && (
+                <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full animate-ping"></span>
+              )}
             </button>
             <button onClick={() => setActiveTab('stats')} className={`flex-1 p-3 rounded-xl font-gaming text-xs uppercase transition-all flex items-center gap-3 ${activeTab === 'stats' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/50' : 'text-gray-500 hover:text-white'}`}>
               <span className="text-lg">📈</span> Logs
@@ -275,15 +331,40 @@ const App: React.FC = () => {
                 onIncrementTopic={() => setCurrentTopics(t => t + 1)}
               />
               
-              {dailyBoss && (
-                <div className="glass rounded-2xl p-6 border-l-4 border-l-red-500 relative overflow-hidden">
-                  <h3 className="font-gaming text-red-500 text-xs mb-2 flex items-center gap-2">
-                    <span className="animate-pulse">⚠️</span> PRIORITY BOSS SPAWNED
+              {assignmentStatus.urgentCount > 0 && (
+                <div className="bg-red-900/10 border border-red-500/30 rounded-2xl p-6 relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-red-600/5 -rotate-45 translate-x-12 translate-y--8 pointer-events-none"></div>
+                  <h3 className="font-gaming text-red-500 text-xs mb-4 flex items-center gap-2">
+                    <span className="w-2 h-2 bg-red-600 rounded-full animate-ping"></span> INCOMING THREATS
+                  </h3>
+                  <div className="space-y-3">
+                    {assignmentStatus.urgentList.map(task => (
+                      <div key={task.id} className="flex items-center justify-between bg-red-600/5 p-3 rounded-lg border border-red-500/20">
+                        <div>
+                          <div className="font-gaming text-xs text-white uppercase tracking-tighter">{task.title}</div>
+                          <div className="text-[9px] text-red-400 uppercase font-black">{getDaysRemaining(task.dueDate)}</div>
+                        </div>
+                        <button 
+                          onClick={() => completeTask(task.id)}
+                          className="px-3 py-1 bg-red-600 text-white font-gaming text-[8px] rounded uppercase hover:bg-red-500 transition-colors"
+                        >
+                          Defuse
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {dailyBoss && !assignmentStatus.urgentList.find(a => a.title === dailyBoss.title) && (
+                <div className="glass rounded-2xl p-6 border-l-4 border-l-cyan-500 relative overflow-hidden">
+                  <h3 className="font-gaming text-cyan-500 text-xs mb-2 flex items-center gap-2">
+                    <span className="animate-pulse">🛡️</span> INTELLIGENCE SUGGESTION
                   </h3>
                   <h2 className="text-lg font-gaming text-white mb-2">{dailyBoss.title}</h2>
                   <p className="text-xs text-gray-400 leading-relaxed mb-4">{dailyBoss.reason}</p>
-                  <div className="bg-red-500/10 p-3 rounded-lg border border-red-500/20">
-                    <span className="text-[10px] font-bold text-red-400 uppercase tracking-tighter">Tactical Plan: </span>
+                  <div className="bg-cyan-500/10 p-3 rounded-lg border border-cyan-500/20">
+                    <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-tighter">Tactical Plan: </span>
                     <span className="text-[11px] text-gray-300 italic">{dailyBoss.strategy}</span>
                   </div>
                 </div>
@@ -309,23 +390,30 @@ const App: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="glass rounded-2xl p-6 neon-border">
+                <div className="glass rounded-2xl p-6 neon-border relative overflow-hidden">
                   <h3 className="font-gaming text-[10px] text-yellow-400 mb-4 tracking-[0.3em]">URGENT BOUNTIES</h3>
                   <div className="flex flex-col gap-3">
-                    {state.assignments.filter(a => !a.completed).slice(0, 3).map(task => (
-                      <div key={task.id} className="p-3 rounded-xl bg-white/5 border border-white/10 flex items-center justify-between">
-                        <div>
-                          <div className="font-gaming text-xs text-white truncate max-w-[120px]">{task.title}</div>
-                          <div className="text-[9px] text-red-400 uppercase">Expires: {task.dueDate}</div>
+                    {state.assignments.filter(a => !a.completed).slice(0, 3).map(task => {
+                      const isCritical = assignmentStatus.urgentList.some(u => u.id === task.id);
+                      return (
+                        <div key={task.id} className={`p-3 rounded-xl flex items-center justify-between transition-all ${isCritical ? 'bg-red-900/10 border border-red-500/50 shadow-[0_0_10px_rgba(239,68,68,0.1)]' : 'bg-white/5 border border-white/10'}`}>
+                          <div className="min-w-0">
+                            <div className={`font-gaming text-xs truncate max-w-[120px] ${isCritical ? 'text-red-400' : 'text-white'}`}>
+                              {task.title}
+                            </div>
+                            <div className={`text-[9px] uppercase font-bold ${isCritical ? 'text-red-500 animate-pulse' : 'text-gray-500'}`}>
+                              {getDaysRemaining(task.dueDate)}
+                            </div>
+                          </div>
+                          <button 
+                            onClick={() => completeTask(task.id)}
+                            className={`w-7 h-7 rounded-full transition-all flex items-center justify-center border ${isCritical ? 'bg-red-600 text-white border-red-400' : 'bg-cyan-500/20 hover:bg-cyan-500 text-cyan-400 hover:text-black border-cyan-500/30'}`}
+                          >
+                            ✓
+                          </button>
                         </div>
-                        <button 
-                          onClick={() => completeTask(task.id)}
-                          className="w-7 h-7 rounded-full bg-cyan-500/20 hover:bg-cyan-500 text-cyan-400 hover:text-black transition-all flex items-center justify-center border border-cyan-500/30"
-                        >
-                          ✓
-                        </button>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -334,13 +422,13 @@ const App: React.FC = () => {
 
           {activeTab === 'stats' && (
             <div className="glass rounded-2xl p-6 neon-border min-h-[500px]">
-              <h2 className="font-gaming text-xl text-white mb-6 uppercase tracking-widest">Mission Intelligence Logs</h2>
+              <h2 className="font-gaming text-xl text-white mb-6 uppercase tracking-widest text-center">Mission Intelligence Logs</h2>
               <div className="grid grid-cols-2 gap-4 mb-8">
-                <div className="bg-white/5 p-4 rounded-xl border border-white/10">
+                <div className="bg-white/5 p-4 rounded-xl border border-white/10 flex flex-col items-center">
                   <div className="text-[10px] text-gray-500 uppercase mb-1">Total Topics Logged</div>
                   <div className="text-3xl font-gaming text-cyan-400">{state.stats.topicHistory.reduce((acc, curr) => acc + curr.count, 0)}</div>
                 </div>
-                <div className="bg-white/5 p-4 rounded-xl border border-white/10">
+                <div className="bg-white/5 p-4 rounded-xl border border-white/10 flex flex-col items-center">
                   <div className="text-[10px] text-gray-500 uppercase mb-1">Active Study Time</div>
                   <div className="text-3xl font-gaming text-purple-400">
                     {Math.round(state.stats.topicHistory.reduce((acc, curr) => acc + curr.durationMinutes, 0) / 60)}h
@@ -348,10 +436,10 @@ const App: React.FC = () => {
                 </div>
               </div>
 
-              <h3 className="font-gaming text-sm text-gray-400 mb-4 uppercase tracking-widest">Recent Session History</h3>
+              <h3 className="font-gaming text-sm text-gray-400 mb-4 uppercase tracking-widest border-b border-white/5 pb-2">Recent Session History</h3>
               <div className="space-y-3">
                  {state.stats.topicHistory.slice(-5).reverse().map((record, idx) => (
-                   <div key={idx} className="bg-white/5 p-3 rounded-xl border border-white/10 flex justify-between items-center">
+                   <div key={idx} className="bg-white/5 p-3 rounded-xl border border-white/10 flex justify-between items-center hover:bg-white/10 transition-colors">
                      <div>
                        <div className="font-gaming text-xs text-white">{record.subjectName}</div>
                        <div className="text-[9px] text-gray-500">{new Date(record.date).toLocaleDateString()} • {record.durationMinutes}m duration</div>
@@ -369,7 +457,7 @@ const App: React.FC = () => {
 
           {activeTab === 'schedule' && (
             <div className="glass rounded-2xl p-6 neon-border min-h-[500px]">
-              <h2 className="font-gaming text-xl text-white mb-6 uppercase tracking-widest">Territory Maps</h2>
+              <h2 className="font-gaming text-xl text-white mb-6 uppercase tracking-widest text-center">Territory Maps</h2>
               <div className="space-y-6">
                 {(Object.keys(state.timetable) as DayOfWeek[]).map(day => (
                   <div key={day} className={`p-4 rounded-xl border transition-all ${day === currentDay ? 'bg-cyan-500/5 border-cyan-500/30' : 'bg-white/5 border-white/5'}`}>
@@ -395,29 +483,32 @@ const App: React.FC = () => {
                 <button className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-[9px] font-gaming border border-white/10 transition-all uppercase tracking-widest">Initialize New</button>
               </div>
               <div className="space-y-4">
-                {state.assignments.map(task => (
-                  <div key={task.id} className={`glass p-4 rounded-xl border border-white/10 flex items-center gap-4 transition-all ${task.completed ? 'opacity-40 grayscale' : 'hover:border-cyan-500/40'}`}>
-                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-xl ${task.completed ? 'bg-green-500/10 text-green-500' : 'bg-cyan-500/10 text-cyan-400'}`}>
-                      {task.completed ? '🏆' : '⚔️'}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-gaming text-xs text-white truncate">{task.title}</h4>
-                        <span className={`text-[7px] px-1 py-0.5 rounded font-black uppercase ${task.priority === 'High' ? 'bg-red-500/20 text-red-500' : 'bg-gray-500/20 text-gray-400'}`}>
-                          {task.priority}
-                        </span>
+                {state.assignments.map(task => {
+                  const isCritical = assignmentStatus.urgentList.some(u => u.id === task.id);
+                  return (
+                    <div key={task.id} className={`glass p-4 rounded-xl border flex items-center gap-4 transition-all ${task.completed ? 'opacity-40 grayscale border-white/5' : isCritical ? 'border-red-500 bg-red-900/5 animate-pulse-slow' : 'border-white/10 hover:border-cyan-500/40'}`}>
+                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-xl ${task.completed ? 'bg-green-500/10 text-green-500' : isCritical ? 'bg-red-500/20 text-red-500' : 'bg-cyan-500/10 text-cyan-400'}`}>
+                        {task.completed ? '🏆' : isCritical ? '🚨' : '⚔️'}
                       </div>
-                      <div className="text-[9px] text-gray-500 mt-1 uppercase tracking-tighter">
-                        Loot: <span className="text-cyan-400">+{task.xpReward} XP</span> • Target: <span className="text-gray-300">{task.dueDate}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <h4 className={`font-gaming text-xs truncate ${isCritical ? 'text-red-400 font-black' : 'text-white'}`}>{task.title}</h4>
+                          <span className={`text-[7px] px-1 py-0.5 rounded font-black uppercase ${task.priority === 'High' ? 'bg-red-500/20 text-red-500' : 'bg-gray-500/20 text-gray-400'}`}>
+                            {task.priority}
+                          </span>
+                        </div>
+                        <div className="text-[9px] text-gray-500 mt-1 uppercase tracking-tighter">
+                          Loot: <span className="text-cyan-400">+{task.xpReward} XP</span> • Target: <span className={isCritical ? 'text-red-500 font-black' : 'text-gray-300'}>{task.dueDate} ({getDaysRemaining(task.dueDate)})</span>
+                        </div>
                       </div>
+                      {!task.completed && (
+                        <button onClick={() => completeTask(task.id)} className={`px-3 py-2 font-gaming text-[9px] rounded-lg transition-all active:scale-95 uppercase font-black ${isCritical ? 'bg-red-600 text-white shadow-lg shadow-red-500/20' : 'bg-cyan-600 hover:bg-cyan-500 text-black'}`}>
+                          Claim
+                        </button>
+                      )}
                     </div>
-                    {!task.completed && (
-                      <button onClick={() => completeTask(task.id)} className="px-3 py-2 bg-cyan-600 hover:bg-cyan-500 text-black font-gaming text-[9px] rounded-lg transition-all active:scale-95 uppercase font-black">
-                        Claim
-                      </button>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -426,7 +517,7 @@ const App: React.FC = () => {
         {/* Right Column: Party & Social */}
         <aside className="lg:col-span-3 flex flex-col gap-6">
            <div className="glass rounded-2xl p-6 neon-border">
-            <h3 className="font-gaming text-[10px] text-purple-400 mb-4 uppercase tracking-widest">Global Ranking</h3>
+            <h3 className="font-gaming text-[10px] text-purple-400 mb-4 uppercase tracking-widest border-b border-purple-500/20 pb-2">Global Ranking</h3>
             <div className="space-y-4">
               {[
                 { name: 'X_Factor_Hero', level: 19, avatar: '🐉' },
@@ -435,23 +526,29 @@ const App: React.FC = () => {
               ].map((rival, i) => (
                 <div key={i} className="flex items-center gap-3 p-2 bg-white/5 rounded-lg border border-transparent hover:border-purple-500/20 transition-all">
                   <div className="text-xl">{rival.avatar}</div>
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <div className="text-[10px] font-gaming text-white truncate">{rival.name}</div>
                     <div className="text-[9px] text-gray-500 uppercase tracking-tighter">Level {rival.level}</div>
                   </div>
-                  <div className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]"></div>
+                  <div className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)] flex-shrink-0"></div>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="glass rounded-2xl p-6 neon-border flex-1">
-            <h3 className="font-gaming text-[10px] text-gray-500 mb-4 uppercase tracking-widest">Mission Events</h3>
-            <div className="space-y-4 text-[10px] overflow-y-auto max-h-[300px] pr-2 custom-scrollbar">
+          <div className="glass rounded-2xl p-6 neon-border flex-1 flex flex-col">
+            <h3 className="font-gaming text-[10px] text-gray-500 mb-4 uppercase tracking-widest border-b border-white/5 pb-2">Mission Events</h3>
+            <div className="space-y-4 text-[10px] overflow-y-auto max-h-[300px] pr-2 custom-scrollbar flex-1">
               <div className="flex gap-2">
                 <span className="text-green-500 font-bold">»</span>
                 <span className="text-gray-400">System: <span className="text-cyan-400">School Mode Engaged</span> for sector {currentDay}.</span>
               </div>
+              {assignmentStatus.urgentCount > 0 && (
+                <div className="flex gap-2 animate-pulse">
+                  <span className="text-red-500 font-bold">»</span>
+                  <span className="text-red-400 font-bold">Warning: <span className="text-white">Critical Time Dilation</span> detected in Assignment Quests.</span>
+                </div>
+              )}
               {state.stats.attendance.length > 0 && (
                 <div className="flex gap-2">
                   <span className="text-yellow-500 font-bold">»</span>
@@ -473,7 +570,12 @@ const App: React.FC = () => {
       <footer className="lg:hidden glass fixed bottom-4 left-4 right-4 p-2 rounded-2xl neon-border flex justify-around z-50">
         <button onClick={() => setActiveTab('dash')} className={`p-3 text-xl ${activeTab === 'dash' ? 'text-cyan-400' : 'text-gray-500'}`}>📊</button>
         <button onClick={() => setActiveTab('schedule')} className={`p-3 text-xl ${activeTab === 'schedule' ? 'text-cyan-400' : 'text-gray-500'}`}>📅</button>
-        <button onClick={() => setActiveTab('tasks')} className={`p-3 text-xl ${activeTab === 'tasks' ? 'text-cyan-400' : 'text-gray-500'}`}>⚔️</button>
+        <button onClick={() => setActiveTab('tasks')} className={`relative p-3 text-xl ${activeTab === 'tasks' ? 'text-cyan-400' : 'text-gray-500'}`}>
+          ⚔️
+          {assignmentStatus.urgentCount > 0 && (
+            <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full animate-ping"></span>
+          )}
+        </button>
         <button onClick={() => setActiveTab('stats')} className={`p-3 text-xl ${activeTab === 'stats' ? 'text-cyan-400' : 'text-gray-500'}`}>📈</button>
       </footer>
     </div>
